@@ -1,0 +1,204 @@
+
+#-------------------------------------------------------------#
+#----Initial Declarations-------------------------------------#
+#-------------------------------------------------------------#
+
+Add-Type -AssemblyName PresentationCore, PresentationFramework
+
+$Xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="800" Height="500">
+<Grid Margin="9,5,-9,-5">
+
+<Label HorizontalAlignment="Left" VerticalAlignment="Top" Content="Intune Win App Util executible path" Margin="5.16668701171875,0,0,0"/>
+<TextBox HorizontalAlignment="Left" Name="IntunePrepToolPath" VerticalAlignment="Top" Height="22" Width="633" Margin="5.16668701171875,23,0,0"/>
+<Button Name="IntunePrepToolPathButton" Content="Browse" HorizontalAlignment="Left" VerticalAlignment="Top" Width="76" Margin="646,23,0,0" Height="23"/>
+
+<Label HorizontalAlignment="Left" VerticalAlignment="Top" Content="Application Source path" Margin="5.16668701171875,60,0,0"/>
+<TextBox HorizontalAlignment="Left" Name="Path2SourceFolder" VerticalAlignment="Top" Height="22" Width="633" Margin="5.16668701171875,83,0,0"/>
+<Button Name="Path2SourceFolderButton" Content="Browse" HorizontalAlignment="Left" VerticalAlignment="Top" Width="76" Margin="646,83,0,0" Height="23"/>
+
+<Label HorizontalAlignment="Left" VerticalAlignment="Top" Content="Intunewin Output folder" Margin="5.16668701171875,120,0,0"/>
+<TextBox HorizontalAlignment="Left" Name="OutputFolder" VerticalAlignment="Top" Height="22" Width="633" Margin="5.16668701171875,143,0,0"/>
+<Button Name="OutputFolderButton" Content="Browse" HorizontalAlignment="Left" VerticalAlignment="Top" Width="76" Margin="646,143,0,0" Height="23"/>
+
+<Label HorizontalAlignment="Left" VerticalAlignment="Top" Content="Setup Name" Margin="5.16668701171875,180,0,0"/>
+<TextBox HorizontalAlignment="Left" Name="SetupName" VerticalAlignment="Top" Height="22" Width="400" Margin="5.16668701171875,203,0,0"/>
+<Button Name="SetupNameButton" Content="Browse" HorizontalAlignment="Left" VerticalAlignment="Top" Width="76" Margin="426,203,0,0" Height="23"/>
+
+
+<CheckBox HorizontalAlignment="Left" VerticalAlignment="Top" Name="SModeCatalogCheck" Content="Support Win S Mode" Margin="9.16668701171875,260,0,0"/>
+<Label HorizontalAlignment="Left" Name="SModeCatalogLabel" VerticalAlignment="Top" Content="Smode Catalog output Path" Margin="25.16668701171875,290,0,0" IsEnabled="False"/>
+<TextBox HorizontalAlignment="Left" Name="SModeCatalog" VerticalAlignment="Top" Height="22" Width="400" Margin="25.16668701171875,320,0,0" IsEnabled="False"/>
+<Button Name="SModeCatalogButton" Content="Browse" HorizontalAlignment="Left" VerticalAlignment="Top" Width="76" Margin="446,320,0,0" Height="23" IsEnabled="False"/>
+
+<Button Content="Build IntuneWin" Name="Build" HorizontalAlignment="center" VerticalAlignment="Top" Width="100" Margin="591.1666870117188,416,0,0" IsEnabled="False"/>
+</Grid>
+</Window>
+"@
+
+#-------------------------------------------------------------#
+#----Control Event Handlers-----------------------------------#
+#-------------------------------------------------------------#
+
+
+#region Logic
+Function Read-FolderBrowserDialog([string]$Message, [string]$InitialDirectory)
+    {
+    $AssemblyFullName = 'System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089'
+    $Assembly = [System.Reflection.Assembly]::Load($AssemblyFullName)
+    $OpenFileDialog = [System.Windows.Forms.OpenFileDialog]::new()
+    $OpenFileDialog.AddExtension = $false
+    $OpenFileDialog.CheckFileExists = $false
+    $OpenFileDialog.DereferenceLinks = $true
+    $OpenFileDialog.Filter = "Folders|`n"
+    $OpenFileDialog.Multiselect = $false
+    if($Message){$OpenFileDialog.Title =$Message}else{$OpenFileDialog.Title = "Select folder"}
+    $OpenFileDialog.InitialDirectory=$InitialDirectory
+    $OpenFileDialogType = $OpenFileDialog.GetType()
+    $FileDialogInterfaceType = $Assembly.GetType('System.Windows.Forms.FileDialogNative+IFileDialog')
+    $IFileDialog = $OpenFileDialogType.GetMethod('CreateVistaDialog',@('NonPublic','Public','Static','Instance')).Invoke($OpenFileDialog,$null)
+    $OpenFileDialogType.GetMethod('OnBeforeVistaDialog',@('NonPublic','Public','Static','Instance')).Invoke($OpenFileDialog,$IFileDialog)
+    [uint32]$PickFoldersOption = $Assembly.GetType('System.Windows.Forms.FileDialogNative+FOS').GetField('FOS_PICKFOLDERS').GetValue($null)
+    $FolderOptions = $OpenFileDialogType.GetMethod('get_Options',@('NonPublic','Public','Static','Instance')).Invoke($OpenFileDialog,$null) -bor $PickFoldersOption
+    $FileDialogInterfaceType.GetMethod('SetOptions',@('NonPublic','Public','Static','Instance')).Invoke($IFileDialog,$FolderOptions)
+    $VistaDialogEvent = [System.Activator]::CreateInstance($AssemblyFullName,'System.Windows.Forms.FileDialog+VistaDialogEvents',$false,0,$null,$OpenFileDialog,$null,$null).Unwrap()
+    [uint32]$AdviceCookie = 0
+    $AdvisoryParameters = @($VistaDialogEvent,$AdviceCookie)
+    $AdviseResult = $FileDialogInterfaceType.GetMethod('Advise',@('NonPublic','Public','Static','Instance')).Invoke($IFileDialog,$AdvisoryParameters)
+    $AdviceCookie = $AdvisoryParameters[1]
+    $Result = $FileDialogInterfaceType.GetMethod('Show',@('NonPublic','Public','Static','Instance')).Invoke($IFileDialog,[System.IntPtr]::Zero)
+    $FileDialogInterfaceType.GetMethod('Unadvise',@('NonPublic','Public','Static','Instance')).Invoke($IFileDialog,$AdviceCookie)
+    if ($Result -eq [System.Windows.Forms.DialogResult]::OK) {
+        $FileDialogInterfaceType.GetMethod('GetResult',@('NonPublic','Public','Static','Instance')).Invoke($IFileDialog,$null)
+    
+    }
+    [string]$output=$OpenFileDialog.FileName
+
+    write-host $output.trim()
+    if ($output.trim() -ne ""){ return $output.trim()}
+
+
+}
+Function Get-FileName($Message, $initialDirectory, $filter="Executable files (*.exe)| *.exe", [switch]$FilenameOnly)
+{  
+    
+    [System.Reflection.Assembly]::LoadWithPartialName("System.windows.forms") |
+    Out-Null
+    $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $OpenFileDialog.initialDirectory = $initialDirectory
+    $OpenFileDialog.filter = $filter
+    if($Message){$OpenFileDialog.Title =$Message}else{$OpenFileDialog.Title = "Select file"}
+    $OpenFileDialog.ShowDialog() | Out-Null
+    #$OpenFileDialog.filename
+    if($FilenameOnly){[string]$output=$OpenFileDialog.SafeFileName}Else{[string]$output=$OpenFileDialog.FileName}
+    
+    #write-host $output.trim()
+    if ($output.trim() -ne ""){ return $output.trim()}
+} 
+
+
+
+
+
+Function Set-IntunePrepToolPathButton{
+
+    [string]$Value=$null; 
+    $Value=Get-FileName -Message "Please select a the IntuneWinAppUtil" -initialDirectory $IntunePrepToolPath.Text.trim()
+    if($value.trim() -ne "" -and $value -ne $null){$IntunePrepToolPath.Text=$value.trim()}
+    Check-Fields
+
+}
+
+Function Set-Path2SourceFolderButton{
+    
+    [string]$Value=$null; 
+    $Value=Read-FolderBrowserDialog -Message "Please select a the Source folder" -initialDirectory $Path2SourceFolder.Text.trim()
+    if($value.trim() -ne "" -and $value -ne $null){$Path2SourceFolder.Text=$value.trim()}
+    Check-Fields
+
+}
+
+Function Set-OutputFolderButton{
+    
+    [string]$Value=$null; 
+    $Value=Read-FolderBrowserDialog -Message "Please select a the IntunWin Output Folder" -initialDirectory $OutputFolder.Text.trim()
+    if($value.trim() -ne "" -and $value -ne $null){$OutputFolder.Text=$value.trim()}
+    Check-Fields
+
+}
+Function Set-SModeCatalogCheck{
+    
+    if ($SModeCatalogCheck.IsChecked -eq $false){
+        $SModeCatalog.IsEnabled=$false
+        $SModeCatalogButton.IsEnabled=$false
+        $SModeCatalogLabel.IsEnabled=$false
+    }else{
+        $SModeCatalog.IsEnabled=$true
+        $SModeCatalogButton.IsEnabled=$true
+        $SModeCatalogLabel.IsEnabled=$true
+    }
+    Check-Fields
+}
+
+
+Function Set-SetupNameButton{
+    
+    [string]$Value=$null; 
+    $Value=Get-FileName -Message "Please select the Setup File" -filter "All files (*.*)| *.*" -FilenameOnly
+    if($value.trim() -ne "" -and $value -ne $null){$SetupName.Text=$value.trim()}
+    Check-Fields
+}
+Function Set-SModeCatalogButton{
+    
+    [string]$Value=$null; 
+    $Value=Read-FolderBrowserDialog -Message "Please select a the IntunWin Output Folder" -initialDirectory $SModeCatalog.Text.trim()
+    if($value.trim() -ne "" -and $value -ne $null){$SModeCatalog.Text=$value.trim()}
+    Check-Fields
+
+}
+
+Function Invoke-IntuneBuild{
+    if($SModeCatalogCheck.IsChecked){$SMode=" -a `"$($SModeCatalog.Text.trim())`""}else{$SMode=""}
+    Start-Process -FilePath "$($IntunePrepToolPath.Text.trim())" -ArgumentList "-c `"$($Path2SourceFolder.Text.trim())`" -s `"$($SetupName.Text.trim())`" -o `"$($OutputFolder.Text.trim())`" $SMode" -Wait -NoNewWindow
+
+}
+
+
+
+Function Check-Fields{
+    if (
+    $IntunePrepToolPath.Text.trim() -notin ($null,"") -and 
+    $Path2SourceFolder.Text.trim() -notin ($null,"") -and 
+    $SetupName.Text.trim() -notin ($null,"") -and 
+    $OutputFolder.Text.trim() -notin ($null,"") -and 
+    (($SModeCatalogCheck.IsChecked -eq $true -and $SModeCatalog.Text.trim() -notin ($null,"")) -or $SModeCatalogCheck.IsChecked -eq $false)){
+        $Build.IsEnabled=$true
+    }else{
+        $Build.IsEnabled=$false
+    }
+}
+#endregion 
+
+
+#-------------------------------------------------------------#
+#----Script Execution-----------------------------------------#
+#-------------------------------------------------------------#
+
+$Window = [Windows.Markup.XamlReader]::Parse($Xaml)
+
+[xml]$xml = $Xaml
+
+$xml.SelectNodes("//*[@Name]") | ForEach-Object { Set-Variable -Name $_.Name -Value $Window.FindName($_.Name) }
+
+
+$IntunePrepToolPathButton.Add_Click({Set-IntunePrepToolPathButton $this $_})
+$Path2SourceFolderButton.Add_Click({Set-Path2SourceFolderButton $this $_})
+$OutputFolderButton.Add_Click({Set-OutputFolderButton $this $_})
+$SetupNameButton.Add_Click({Set-SetupNameButton $this $_})
+$SModeCatalogCheck.Add_Click({Set-SModeCatalogCheck $this $_})
+$SModeCatalogButton.Add_Click({Set-OutputFolderButton $this $_})
+$Build.Add_Click({Invoke-IntuneBuild $this $_})
+
+$Window.ShowDialog()
+
+
